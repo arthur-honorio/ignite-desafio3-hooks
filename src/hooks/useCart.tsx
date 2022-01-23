@@ -1,10 +1,4 @@
-import {
-  createContext,
-  ReactNode,
-  useContext,
-  useEffect,
-  useState,
-} from "react"
+import { createContext, ReactNode, useContext, useState } from "react"
 import { toast } from "react-toastify"
 import { api } from "../services/api"
 import { Product, Stock } from "../types"
@@ -17,11 +11,6 @@ interface UpdateProductAmount {
   productId: number
   amount: number
 }
-interface NewCartWhenRemovingProduct {
-  removed: Product[]
-  mantained: Product[]
-}
-
 interface CartContextData {
   cart: Product[]
   addProduct: (productId: number) => Promise<void>
@@ -32,7 +21,6 @@ interface CartContextData {
 const CartContext = createContext<CartContextData>({} as CartContextData)
 
 export function CartProvider({ children }: CartProviderProps): JSX.Element {
-  const [stock, setStock] = useState<Stock[]>([])
   const [cart, setCart] = useState<Product[]>(() => {
     // localStorage.setItem("@RocketShoes:cart", "[]")
     const storagedCart = localStorage.getItem("@RocketShoes:cart")
@@ -43,86 +31,50 @@ export function CartProvider({ children }: CartProviderProps): JSX.Element {
 
     return []
   })
-  console.log(cart, stock)
-
-  useEffect(() => {
-    api.get("/stock").then(response => {
-      console.log(response)
-      setStock(response.data)
-    })
-  }, [])
 
   const addProduct = async (productId: number) => {
     try {
-      let product = await api.get(`products/${productId}`).then(response => ({
-        ...response.data,
-        amount: 0,
-      }))
+      let stockAmount = await api
+        .get(`/stock/${productId}`)
+        .then(response => response.data.amount)
 
-      let productInStock = stock.filter(
-        stockProduct => stockProduct.id === productId
-      )[0]
+      let newCart = [...cart]
 
-      let productsInCart = cart.map(productInCart => productInCart.id)
+      let productInCart = newCart.find(
+        productInCart => productId === productInCart.id
+      )
+      let cartAmount = productInCart?.amount ?? 0
 
-      if (!productsInCart.includes(productId)) {
-
-        let newCart = [...cart, { ...product, amount: 1 }]
-        setCart(newCart)
-        localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart))
+      if (stockAmount < cartAmount + 1) {
+        toast.error("Quantidade solicitada fora de estoque")
+        return
 
       } else {
-        let newCart = cart.map(cartProduct => {
-
-          if (cartProduct.id === productId) {
-
-            if (productInStock.amount === cartProduct.amount ) {
-              throw new Error("Quantidade solicitada fora de estoque")
-            }
-            return {
-              ...cartProduct,
-              amount: cartProduct.amount + 1,
-            }
-
-          } else {
-            return cartProduct
-          }
-        })
+        if (productInCart) {
+          productInCart.amount += 1
+        } else {
+          let product = await api
+            .get(`products/${productId}`)
+            .then(response => ({...response.data, amount: 1}))
+          newCart.push(product)
+        }
 
         setCart(newCart)
-        localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart))
+        localStorage.setItem("@RocketShoes:cart",JSON.stringify(newCart)
+        )
       }
-      setStock(() =>
-        stock.map(product => {
-          if (product.id === productId)
-            return { ...product, amount: productInStock.amount }
-          return product
-        })
-      )
-    } catch (error: any) {
-      console.error(error)
-      toast.error(error.message || "Erro na adição do produto")
+    } catch {
+      toast.error("Erro na adição do produto")
     }
   }
 
   const removeProduct = (productId: number) => {
     try {
-      let newCart = cart.reduce((accumulatedProducts, product) => {
-        if (product.id !== productId)
-          accumulatedProducts.mantained.push(product)
-        else accumulatedProducts.removed.push(product)
-        return accumulatedProducts
-      }, {
-        removed: [],
-        mantained: [],
-      } as NewCartWhenRemovingProduct)
-      setCart([...newCart.mantained])
-      localStorage.setItem(
-        "@RocketShoes:cart",
-        JSON.stringify(newCart.mantained)
-      )
-    } catch(error: any) {
-      console.error(error)
+      let newCart = [...cart].filter(product => productId !== product.id)
+      if (newCart.length === cart.length) throw Error()
+      setCart(newCart)
+      localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart))
+    } catch {
       toast.error("Erro na remoção do produto")
     }
   }
@@ -132,22 +84,27 @@ export function CartProvider({ children }: CartProviderProps): JSX.Element {
     amount,
   }: UpdateProductAmount) => {
     try {
-      let amountOfProductInStock = stock.filter(
-        stockProduct => stockProduct.id === productId
-      )[0].amount
-      let newCart = cart.map(cartProduct => {
-        if (cartProduct.id === productId) {
-          if (amount > amountOfProductInStock)
-            throw new Error("Quantidade solicitada fora de estoque")
-          return { ...cartProduct, amount }
-        }
-        return cartProduct
-      })
-      setCart(newCart)
-      localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart))
-    } catch (error: any) {
-      console.error(error)
-      toast.error(error.message || "Erro na alteração de quantidade do produto")
+      const stockAmount: number = await api
+        .get(`stock/${productId}`)
+        .then(response => response.data.amount)
+
+      if (amount > stockAmount) {
+        toast.error("Quantidade solicitada fora de estoque")
+        return
+      } else if (amount < 1) {
+        throw Error()
+      } else {
+        let newCart = [...cart].map(cartProduct => {
+          if (cartProduct.id === productId) {
+            return { ...cartProduct, amount }
+          }
+          return cartProduct
+        })
+        setCart(newCart)
+        localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart))
+      }
+    } catch {
+      toast.error("Erro na alteração de quantidade do produto")
     }
   }
 
